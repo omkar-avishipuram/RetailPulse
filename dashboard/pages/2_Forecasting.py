@@ -3,15 +3,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-from sklearn.metrics import (
-    mean_absolute_error,
-    mean_squared_error,
-)
-from statsmodels.tsa.holtwinters import ExponentialSmoothing
-
-# ----------------------------------------
+# --------------------------------------------------
 # Page Configuration
-# ----------------------------------------
+# --------------------------------------------------
 st.set_page_config(
     page_title="Demand Forecasting",
     page_icon="📈",
@@ -19,176 +13,434 @@ st.set_page_config(
 )
 
 st.title("📈 Demand Forecasting")
-st.markdown("Monthly Sales Forecast using Holt-Winters Exponential Smoothing")
-
-# ----------------------------------------
-# Load Dataset
-# ----------------------------------------
-DATA_PATH = (
-    Path(__file__).parents[2]
-    / "data"
-    / "processed"
-    / "online_retail_clean.csv"
+st.markdown(
+    """
+Forecast future retail sales using the pre-generated Prophet forecast.
+This dashboard visualizes historical sales trends and forecasted demand.
+    """
 )
 
+# --------------------------------------------------
+# File Paths
+# --------------------------------------------------
+BASE_DIR = Path(__file__).parents[2]
+PROCESSED_DIR = BASE_DIR / "data" / "processed"
 
+DAILY_PATH = PROCESSED_DIR / "daily_sales.csv"
+FORECAST_PATH = PROCESSED_DIR / "prophet_forecast.csv"
+
+# --------------------------------------------------
+# Load Data
+# --------------------------------------------------
 @st.cache_data
 def load_data():
-    df = pd.read_csv(DATA_PATH)
-    df["InvoiceDate"] = pd.to_datetime(df["InvoiceDate"])
-    return df
+    daily_df = pd.read_csv(DAILY_PATH)
+    forecast_df = pd.read_csv(FORECAST_PATH)
 
+    daily_df["InvoiceDate"] = pd.to_datetime(daily_df["InvoiceDate"])
+    forecast_df["ds"] = pd.to_datetime(forecast_df["ds"])
 
-df = load_data()
+    return daily_df, forecast_df
 
-st.success("Dataset loaded successfully!")
+daily_df, forecast_df = load_data()
 
-st.subheader("Dataset Preview")
-st.dataframe(df.head())
+st.success("Datasets loaded successfully!")
 
-# ----------------------------------------
-# Monthly Sales
-# ----------------------------------------
-st.header("Monthly Sales")
+# --------------------------------------------------
+# Dataset Preview
+# --------------------------------------------------
+st.header("Dataset Preview")
 
-df["Month"] = df["InvoiceDate"].dt.to_period("M").dt.to_timestamp()
+tab1, tab2 = st.tabs(["Daily Sales", "Forecast"])
 
-monthly_sales = (
-    df.groupby("Month")["TotalAmount"]
-    .sum()
-    .reset_index()
+with tab1:
+    st.dataframe(daily_df.head())
+
+with tab2:
+    st.dataframe(forecast_df.head())
+
+# --------------------------------------------------
+# Dashboard Metrics
+# --------------------------------------------------
+st.header("Overview")
+
+c1, c2, c3, c4 = st.columns(4)
+
+c1.metric("Historical Records", len(daily_df))
+c2.metric("Forecast Records", len(forecast_df))
+c3.metric(
+    "Total Revenue",
+    f"${daily_df['TotalAmount'].sum():,.0f}"
+)
+c4.metric(
+    "Average Daily Sales",
+    f"${daily_df['TotalAmount'].mean():,.2f}"
 )
 
-st.dataframe(monthly_sales.tail())
+# --------------------------------------------------
+# Historical Sales
+# --------------------------------------------------
+st.header("Historical Daily Sales")
 
-# ----------------------------------------
-# Train Forecasting Model
-# ----------------------------------------
-st.header("Training Forecast Model")
-
-series = monthly_sales.set_index("Month")["TotalAmount"]
-
-model = ExponentialSmoothing(
-    series,
-    trend="add",
-    seasonal=None
-)
-
-fit = model.fit()
-
-st.success("Forecast model trained successfully!")
-
-# ----------------------------------------
-# Forecast Next 6 Months
-# ----------------------------------------
-forecast = fit.forecast(6)
-
-forecast_df = pd.DataFrame({
-    "Month": forecast.index,
-    "Forecast": forecast.values
-})
-
-st.subheader("Next 6 Months Forecast")
-
-st.dataframe(forecast_df)
-
-# ----------------------------------------
-# Model Accuracy
-# ----------------------------------------
-predicted = fit.fittedvalues
-
-mae = mean_absolute_error(series, predicted)
-rmse = mean_squared_error(series, predicted) ** 0.5
-
-st.header("Model Performance")
-
-col1, col2 = st.columns(2)
-
-col1.metric("MAE", f"{mae:,.2f}")
-col2.metric("RMSE", f"{rmse:,.2f}")
-
-# ----------------------------------------
-# Sales Trend
-# ----------------------------------------
-st.header("Historical Monthly Sales")
-
-fig, ax = plt.subplots(figsize=(12,5))
+fig, ax = plt.subplots(figsize=(14,5))
 
 ax.plot(
-    monthly_sales["Month"],
-    monthly_sales["TotalAmount"],
-    marker="o",
-    label="Actual"
+    daily_df["InvoiceDate"],
+    daily_df["TotalAmount"],
+    color="steelblue",
+    linewidth=1.5,
+    label="Daily Sales"
 )
 
-ax.set_title("Monthly Sales")
-ax.set_xlabel("Month")
-ax.set_ylabel("Revenue")
-ax.tick_params(axis="x", rotation=45)
+ax.set_title("Daily Sales Trend")
+ax.set_xlabel("Date")
+ax.set_ylabel("Sales")
+ax.legend()
+
+st.pyplot(fig)
+# --------------------------------------------------
+# Rolling Statistics
+# --------------------------------------------------
+st.header("📊 7-Day Rolling Statistics")
+
+fig, ax = plt.subplots(figsize=(14,5))
+
+ax.plot(
+    daily_df["InvoiceDate"],
+    daily_df["TotalAmount"],
+    color="lightgray",
+    linewidth=1,
+    alpha=0.6,
+    label="Daily Sales"
+)
+
+ax.plot(
+    daily_df["InvoiceDate"],
+    daily_df["RollingMean7"],
+    color="blue",
+    linewidth=2,
+    label="7-Day Rolling Mean"
+)
+
+ax.fill_between(
+    daily_df["InvoiceDate"],
+    daily_df["RollingMean7"] - daily_df["RollingStd7"].fillna(0),
+    daily_df["RollingMean7"] + daily_df["RollingStd7"].fillna(0),
+    color="skyblue",
+    alpha=0.25,
+    label="Rolling Std Dev"
+)
+
+ax.set_title("Daily Sales with Rolling Mean")
+ax.set_xlabel("Date")
+ax.set_ylabel("Sales")
 ax.legend()
 
 st.pyplot(fig)
 
-# ----------------------------------------
-# Forecast Plot
-# ----------------------------------------
-st.header("Forecast")
+# --------------------------------------------------
+# Forecast Dataset Summary
+# --------------------------------------------------
+st.header("📈 Forecast Summary")
 
-fig2, ax2 = plt.subplots(figsize=(12,5))
+fc1, fc2, fc3 = st.columns(3)
 
-ax2.plot(
-    series.index,
-    series.values,
-    label="Historical",
-    marker="o"
+fc1.metric(
+    "Forecast Start",
+    forecast_df["ds"].min().strftime("%Y-%m-%d")
 )
 
-ax2.plot(
-    forecast.index,
-    forecast.values,
-    label="Forecast",
-    marker="o",
-    linestyle="--",
-    color="red"
+fc2.metric(
+    "Forecast End",
+    forecast_df["ds"].max().strftime("%Y-%m-%d")
 )
 
-ax2.set_title("Demand Forecast")
-ax2.set_xlabel("Month")
-ax2.set_ylabel("Revenue")
-ax2.tick_params(axis="x", rotation=45)
+fc3.metric(
+    "Average Forecast",
+    f"${forecast_df['yhat'].mean():,.2f}"
+)
+
+# --------------------------------------------------
+# Prophet Forecast
+# --------------------------------------------------
+st.header("🔮 Prophet Sales Forecast")
+
+fig2, ax2 = plt.subplots(figsize=(14,6))
+
+ax2.plot(
+    forecast_df["ds"],
+    forecast_df["yhat"],
+    color="red",
+    linewidth=2,
+    label="Forecast"
+)
+
+ax2.fill_between(
+    forecast_df["ds"],
+    forecast_df["yhat_lower"],
+    forecast_df["yhat_upper"],
+    color="salmon",
+    alpha=0.30,
+    label="Confidence Interval"
+)
+
+ax2.set_title("Prophet Forecast")
+ax2.set_xlabel("Date")
+ax2.set_ylabel("Predicted Sales")
 ax2.legend()
 
 st.pyplot(fig2)
 
-# ----------------------------------------
-# Save Forecast
-# ----------------------------------------
-OUTPUT_PATH = (
-    Path(__file__).parents[2]
-    / "data"
-    / "processed"
-    / "sales_forecast.csv"
+# --------------------------------------------------
+# Historical vs Forecast
+# --------------------------------------------------
+st.header("📉 Historical vs Forecast")
+
+fig3, ax3 = plt.subplots(figsize=(14,6))
+
+ax3.plot(
+    daily_df["InvoiceDate"],
+    daily_df["TotalAmount"],
+    color="steelblue",
+    linewidth=2,
+    label="Historical Sales"
 )
 
-forecast_df.to_csv(
+ax3.plot(
+    forecast_df["ds"],
+    forecast_df["yhat"],
+    color="crimson",
+    linestyle="--",
+    linewidth=2,
+    label="Forecast"
+)
+
+ax3.set_title("Historical Sales vs Forecast")
+ax3.set_xlabel("Date")
+ax3.set_ylabel("Sales")
+ax3.legend()
+
+st.pyplot(fig3)
+# --------------------------------------------------
+# Forecast Table
+# --------------------------------------------------
+st.header("📋 Forecast Data")
+
+forecast_display = forecast_df[[
+    "ds",
+    "yhat",
+    "yhat_lower",
+    "yhat_upper"
+]].copy()
+
+forecast_display.columns = [
+    "Date",
+    "Forecast",
+    "Lower Bound",
+    "Upper Bound"
+]
+
+st.dataframe(
+    forecast_display,
+    use_container_width=True
+)
+
+# --------------------------------------------------
+# Forecast Statistics
+# --------------------------------------------------
+st.header("📊 Forecast Statistics")
+
+sc1, sc2, sc3, sc4 = st.columns(4)
+
+sc1.metric(
+    "Minimum Forecast",
+    f"${forecast_df['yhat'].min():,.2f}"
+)
+
+sc2.metric(
+    "Maximum Forecast",
+    f"${forecast_df['yhat'].max():,.2f}"
+)
+
+sc3.metric(
+    "Average Forecast",
+    f"${forecast_df['yhat'].mean():,.2f}"
+)
+
+sc4.metric(
+    "Forecast Days",
+    len(forecast_df)
+)
+
+# --------------------------------------------------
+# Monthly Forecast Summary
+# --------------------------------------------------
+st.header("📅 Monthly Forecast Summary")
+
+monthly_forecast = forecast_df.copy()
+
+monthly_forecast["Month"] = (
+    monthly_forecast["ds"]
+    .dt.to_period("M")
+    .astype(str)
+)
+
+monthly_summary = (
+    monthly_forecast
+    .groupby("Month")["yhat"]
+    .sum()
+    .reset_index()
+)
+
+st.dataframe(
+    monthly_summary,
+    use_container_width=True
+)
+
+# --------------------------------------------------
+# Monthly Forecast Chart
+# --------------------------------------------------
+fig4, ax4 = plt.subplots(figsize=(12,5))
+
+ax4.bar(
+    monthly_summary["Month"],
+    monthly_summary["yhat"],
+    color="royalblue"
+)
+
+ax4.set_title("Monthly Forecasted Sales")
+ax4.set_xlabel("Month")
+ax4.set_ylabel("Forecast Sales")
+ax4.tick_params(axis="x", rotation=45)
+
+st.pyplot(fig4)
+
+# --------------------------------------------------
+# Download Forecast
+# --------------------------------------------------
+st.header("📥 Download Forecast")
+
+csv = forecast_display.to_csv(index=False).encode("utf-8")
+
+st.download_button(
+    label="Download Forecast CSV",
+    data=csv,
+    file_name="sales_forecast.csv",
+    mime="text/csv"
+)
+# --------------------------------------------------
+# Save Forecast
+# --------------------------------------------------
+st.header("💾 Save Forecast")
+
+OUTPUT_PATH = PROCESSED_DIR / "sales_forecast.csv"
+
+forecast_display.to_csv(
     OUTPUT_PATH,
     index=False
 )
 
-st.success("Forecast saved successfully!")
+st.success(f"Forecast saved successfully to:\n\n{OUTPUT_PATH}")
 
-# ----------------------------------------
-# Summary
-# ----------------------------------------
-st.header("Summary")
+# --------------------------------------------------
+# Forecast Insights
+# --------------------------------------------------
+st.header("📌 Forecast Insights")
 
-col1, col2, col3 = st.columns(3)
+max_idx = forecast_df["yhat"].idxmax()
+min_idx = forecast_df["yhat"].idxmin()
 
-col1.metric("Transactions", len(df))
-col2.metric("Months", len(monthly_sales))
-col3.metric(
-    "Total Revenue",
-    f"${df['TotalAmount'].sum():,.2f}"
+highest_date = forecast_df.loc[max_idx, "ds"]
+highest_value = forecast_df.loc[max_idx, "yhat"]
+
+lowest_date = forecast_df.loc[min_idx, "ds"]
+lowest_value = forecast_df.loc[min_idx, "yhat"]
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.info(
+        f"""
+### 📈 Peak Forecast
+
+**Date:** {highest_date.strftime('%d %b %Y')}
+
+**Predicted Sales:** ${highest_value:,.2f}
+"""
+    )
+
+with col2:
+    st.info(
+        f"""
+### 📉 Lowest Forecast
+
+**Date:** {lowest_date.strftime('%d %b %Y')}
+
+**Predicted Sales:** ${lowest_value:,.2f}
+"""
+    )
+
+# --------------------------------------------------
+# Dataset Information
+# --------------------------------------------------
+st.header("📂 Dataset Information")
+
+info_df = pd.DataFrame(
+    {
+        "Dataset": [
+            "daily_sales.csv",
+            "prophet_forecast.csv",
+            "sales_forecast.csv",
+        ],
+        "Rows": [
+            len(daily_df),
+            len(forecast_df),
+            len(forecast_display),
+        ],
+        "Columns": [
+            daily_df.shape[1],
+            forecast_df.shape[1],
+            forecast_display.shape[1],
+        ],
+    }
 )
 
-st.success("Demand Forecasting completed successfully!")
+st.dataframe(info_df, use_container_width=True)
+
+# --------------------------------------------------
+# Dashboard Summary
+# --------------------------------------------------
+st.header("📊 Dashboard Summary")
+
+m1, m2, m3, m4 = st.columns(4)
+
+m1.metric(
+    "Historical Records",
+    f"{len(daily_df):,}"
+)
+
+m2.metric(
+    "Forecast Records",
+    f"{len(forecast_df):,}"
+)
+
+m3.metric(
+    "Forecast Months",
+    monthly_summary.shape[0]
+)
+
+m4.metric(
+    "Total Historical Revenue",
+    f"${daily_df['TotalAmount'].sum():,.0f}"
+)
+
+# --------------------------------------------------
+# Footer
+# --------------------------------------------------
+st.divider()
+
+st.success("✅ Demand Forecasting Dashboard loaded successfully!")
+
+st.caption(
+    "RetailPulse • Demand Forecasting using Prophet • Streamlit Dashboard"
+)
