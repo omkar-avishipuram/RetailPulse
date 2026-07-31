@@ -15,7 +15,18 @@ from sklearn.metrics import (
     roc_curve,
     roc_auc_score,
 )
+from pathlib import Path
 
+DATA_PATH = (
+    Path(__file__).parents[2]
+    / "data"
+    / "processed"
+    / "customer_churn.csv"
+)
+
+df = pd.read_csv(DATA_PATH)
+
+print(df.columns)
 # --------------------------------------------------
 # Page Configuration
 # --------------------------------------------------
